@@ -13,6 +13,7 @@ from torch.cuda.amp import autocast
 from torch.cuda.amp import GradScaler
 
 from lib.utils.misc import get_world_size
+from lib.utils import TensorDict
 
 
 class LTRTrainer(BaseTrainer):
@@ -73,6 +74,8 @@ class LTRTrainer(BaseTrainer):
 
         for i, data in enumerate(loader, 1):
             self.data_read_done_time = time.time()
+
+            data = TensorDict(data)
             # get inputs
             if self.move_data_to_gpu:
                 data = data.to(self.device)

@@ -16,6 +16,34 @@ class TensorDict(OrderedDict):
 
     def __deepcopy__(self, memodict={}):
         return TensorDict(copy.deepcopy(list(self), memodict))
+    
+    def to(self, *args, **kwargs):
+        """
+        将内部所有张量和支持 .to() 方法的对象移动到指定设备。
+        """
+        # 创建一个新的 TensorDict 来存储结果
+        new_dict = TensorDict()
+        for k, v in self.items():
+            # 检查值(v)是否有 .to() 方法
+            if hasattr(v, 'to'):
+                new_dict[k] = v.to(*args, **kwargs)
+            else:
+                new_dict[k] = v  # 如果没有，则直接复制
+        return new_dict
+
+    def pin_memory(self):
+        """
+        将内部所有张量移动到锁页内存。
+        """
+        # 创建一个新的 TensorDict 来存储结果
+        pinned_dict = TensorDict()
+        for k, v in self.items():
+            # 检查值(v)是否有 pin_memory 方法 (通常是Tensor)
+            if hasattr(v, 'pin_memory'):
+                pinned_dict[k] = v.pin_memory()
+            else:
+                pinned_dict[k] = v # 如果没有，则直接复制
+        return pinned_dict
 
     def __getattr__(self, name):
         if not hasattr(torch.Tensor, name):
@@ -202,6 +230,20 @@ class TensorList(list):
 
     def apply(self, fn):
         return TensorList([fn(e) for e in self])
+
+    def to(self, *args, **kwargs):
+        """将内部所有张量和支持 .to() 方法的对象移动到指定设备。"""
+        return TensorList([
+            v.to(*args, **kwargs) if hasattr(v, 'to') else v
+            for v in self
+        ])
+
+    def pin_memory(self):
+        """将内部所有张量移动到锁页内存。"""
+        return TensorList([
+            v.pin_memory() if hasattr(v, 'pin_memory') else v
+            for v in self
+        ])
 
     def __getattr__(self, name):
         if not hasattr(torch.Tensor, name):
