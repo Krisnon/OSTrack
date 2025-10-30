@@ -223,3 +223,4 @@ def vit_large_patch16_224_ce(pretrained=False, **kwargs):
         patch_size=16, embed_dim=1024, depth=24, num_heads=16, **kwargs)
     model = _create_vision_transformer(pretrained=pretrained, **model_kwargs)
     return model
+

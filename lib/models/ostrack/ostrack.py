@@ -122,6 +122,14 @@ def build_ostrack(cfg, training=True):
         hidden_dim = backbone.embed_dim
         patch_start_index = 1
 
+    elif cfg.MODEL.BACKBONE.TYPE == 'vit_tiny_patch16_224_ce':
+        backbone = vit_tiny_patch16_224_ce(pretrained, drop_path_rate=cfg.TRAIN.DROP_PATH_RATE,
+                                           ce_loc=cfg.MODEL.BACKBONE.CE_LOC,
+                                           ce_keep_ratio=cfg.MODEL.BACKBONE.CE_KEEP_RATIO,
+                                           )
+        hidden_dim = backbone.embed_dim
+        patch_start_index = 1
+
     else:
         raise NotImplementedError
 
