@@ -11,7 +11,7 @@ from torch.nn.modules.transformer import _get_clones
 
 from lib.models.layers.head import build_box_head
 from lib.models.ostrack.vit import vit_base_patch16_224
-from lib.models.ostrack.vit_ce import vit_large_patch16_224_ce, vit_base_patch16_224_ce
+from lib.models.ostrack.vit_ce import vit_large_patch16_224_ce, vit_base_patch16_224_ce, vit_tiny_patch16_224_ce
 from lib.utils.box_ops import box_xyxy_to_cxcywh
 
 
@@ -94,7 +94,7 @@ class OSTrack(nn.Module):
 
 def build_ostrack(cfg, training=True):
     current_dir = os.path.dirname(os.path.abspath(__file__))  # This is your Project Root
-    pretrained_path = os.path.join(current_dir, '../../../pretrained_models')
+    pretrained_path = os.path.join(current_dir, '../../../pretrained')
     if cfg.MODEL.PRETRAIN_FILE and ('OSTrack' not in cfg.MODEL.PRETRAIN_FILE) and training:
         pretrained = os.path.join(pretrained_path, cfg.MODEL.PRETRAIN_FILE)
     else:

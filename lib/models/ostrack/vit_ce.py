@@ -224,3 +224,11 @@ def vit_large_patch16_224_ce(pretrained=False, **kwargs):
     model = _create_vision_transformer(pretrained=pretrained, **model_kwargs)
     return model
 
+
+def vit_tiny_patch16_224_ce(pretrained=False, **kwargs):
+    """ ViT-Base model (ViT-B/16) from original paper (https://arxiv.org/abs/2010.11929).
+    """
+    model_kwargs = dict(
+        patch_size=16, embed_dim=192, depth=12, num_heads=12, **kwargs)
+    model = _create_vision_transformer(pretrained=pretrained, **model_kwargs)
+    return model
