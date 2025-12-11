@@ -22,7 +22,7 @@ class TrackingSampler(torch.utils.data.Dataset):
 
     def __init__(self, datasets, p_datasets, samples_per_epoch, max_gap,
                  num_search_frames, num_template_frames=1, processing=no_processing, frame_sample_mode='causal',
-                 train_cls=False, pos_prob=0.5, hybrid_seq_prob=0.5): ### --- MODIFIED --- ###
+                 train_cls=False, pos_prob=0.5):
         """
         args:
             datasets - List of datasets to be used for training
@@ -32,9 +32,8 @@ class TrackingSampler(torch.utils.data.Dataset):
             num_search_frames - Number of search frames to sample.
             num_template_frames - Number of template frames to sample.
             processing - An instance of Processing class which performs the necessary processing of the data.
-            frame_sample_mode - Either 'causal', 'interval', 'trident', 'stark', 
-                                'sequence' (NEW), or 'hybrid' (NEW).
-            hybrid_seq_prob - (NEW) Probability of sampling a continuous sequence in 'hybrid' mode.
+            frame_sample_mode - Either 'causal' or 'interval'. If 'causal', then the test frames are sampled in a causally,
+                                otherwise randomly within the interval.
         """
         self.datasets = datasets
         self.train_cls = train_cls  # whether we are training classification
@@ -54,7 +53,6 @@ class TrackingSampler(torch.utils.data.Dataset):
         self.num_template_frames = num_template_frames
         self.processing = processing
         self.frame_sample_mode = frame_sample_mode
-        self.hybrid_seq_prob = hybrid_seq_prob ### --- NEW --- ###
 
     def __len__(self):
         return self.samples_per_epoch
@@ -93,41 +91,8 @@ class TrackingSampler(torch.utils.data.Dataset):
 
         return random.choices(valid_ids, k=num_ids)
 
-    ### --- NEW --- ###
-    def _sample_continuous_visible_ids(self, visible, num_frames):
-        """ Samples a *continuous* sequence of num_frames where all are visible.
-        
-        args:
-            visible - 1d Tensor indicating whether target is visible for each frame
-            num_frames - number of continuous frames to be sampled
-            
-        returns:
-            list - List of sampled frame numbers (e.g., [10, 11, 12]). None if not found.
-        """
-        if num_frames == 0:
-            return []
-        if len(visible) < num_frames:
-            return None
-
-        # Find all valid starting indices
-        valid_start_ids = []
-        for i in range(len(visible) - num_frames + 1):
-            # Check if all frames in the window [i, i + num_frames) are visible
-            if visible[i:i + num_frames].all():
-                valid_start_ids.append(i)
-        
-        if not valid_start_ids:
-            return None
-        
-        # Sample one start id
-        start_id = random.choice(valid_start_ids)
-        # Return the continuous sequence
-        return list(range(start_id, start_id + num_frames))
-    ### --- END NEW --- ###
-
     def __getitem__(self, index):
         if self.train_cls:
-            # Note: getitem_cls logic is not modified for sequence sampling
             return self.getitem_cls()
         else:
             return self.getitem()
@@ -150,72 +115,36 @@ class TrackingSampler(torch.utils.data.Dataset):
             if is_video_dataset:
                 template_frame_ids = None
                 search_frame_ids = None
+                gap_increase = 0
 
-                ### --- MODIFIED --- ###
-                # Determine which sampling mode to use for this item
-                current_sample_mode = self.frame_sample_mode
-                if self.frame_sample_mode == 'hybrid':
-                    current_sample_mode = 'sequence' if random.random() < self.hybrid_seq_prob else 'causal'
-                ### --- END MODIFIED --- ###
-
-                if current_sample_mode == 'causal':
+                if self.frame_sample_mode == 'causal':
                     # Sample test and train frames in a causal manner, i.e. search_frame_ids > template_frame_ids
-                    gap_increase = 0
                     while search_frame_ids is None:
                         base_frame_id = self._sample_visible_ids(visible, num_ids=1, min_id=self.num_template_frames - 1,
                                                                  max_id=len(visible) - self.num_search_frames)
-                        
-                        if base_frame_id is None: # Failsafe
-                            gap_increase += 5
-                            if gap_increase > self.max_gap * 10:
-                                break # Retry sequence
-                            continue
-
                         prev_frame_ids = self._sample_visible_ids(visible, num_ids=self.num_template_frames - 1,
                                                                   min_id=base_frame_id[0] - self.max_gap - gap_increase,
                                                                   max_id=base_frame_id[0])
                         if prev_frame_ids is None:
                             gap_increase += 5
-                            if gap_increase > self.max_gap * 10:
-                                break # Retry sequence
                             continue
-                            
                         template_frame_ids = base_frame_id + prev_frame_ids
                         search_frame_ids = self._sample_visible_ids(visible, min_id=template_frame_ids[0] + 1,
                                                                   max_id=template_frame_ids[0] + self.max_gap + gap_increase,
                                                                   num_ids=self.num_search_frames)
                         # Increase gap until a frame is found
                         gap_increase += 5
-                    
-                    if search_frame_ids is None:
-                        # Failed to find frames, retry sampling a new sequence
-                        continue 
-                
-                ### --- NEW --- ###
-                elif current_sample_mode == 'sequence':
-                    num_continuous_frames = self.num_template_frames + self.num_search_frames
-                    frame_ids = self._sample_continuous_visible_ids(visible, num_continuous_frames)
-                    
-                    if frame_ids is None:
-                        # This sequence doesn't have a long enough continuous visible block
-                        # Retry sampling a new sequence
-                        continue
-                    
-                    template_frame_ids = frame_ids[:self.num_template_frames]
-                    search_frame_ids = frame_ids[self.num_template_frames:]
-                ### --- END NEW --- ###
 
                 elif self.frame_sample_mode == "trident" or self.frame_sample_mode == "trident_pro":
                     template_frame_ids, search_frame_ids = self.get_frame_ids_trident(visible)
                 elif self.frame_sample_mode == "stark":
                     template_frame_ids, search_frame_ids = self.get_frame_ids_stark(visible, seq_info_dict["valid"])
                 else:
-                    raise ValueError(f"Illegal frame sample mode: {self.frame_sample_mode}")
+                    raise ValueError("Illegal frame sample mode")
             else:
                 # In case of image dataset, just repeat the image to generate synthetic video
                 template_frame_ids = [1] * self.num_template_frames
                 search_frame_ids = [1] * self.num_search_frames
-            
             try:
                 template_frames, template_anno, meta_obj_train = dataset.get_frames(seq_id, template_frame_ids, seq_info_dict)
                 search_frames, search_anno, meta_obj_test = dataset.get_frames(seq_id, search_frame_ids, seq_info_dict)
@@ -269,8 +198,7 @@ class TrackingSampler(torch.utils.data.Dataset):
                 elif self.frame_sample_mode == "stark":
                     template_frame_ids, search_frame_ids = self.get_frame_ids_stark(visible, seq_info_dict["valid"])
                 else:
-                    # Note: 'causal', 'sequence', 'hybrid' are not supported for classification
-                    raise ValueError("illegal frame sample mode for classification")
+                    raise ValueError("illegal frame sample mode")
             else:
                 # In case of image dataset, just repeat the image to generate synthetic video
                 template_frame_ids = [1] * self.num_template_frames

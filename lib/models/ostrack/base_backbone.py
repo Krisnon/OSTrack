@@ -34,6 +34,9 @@ class BaseBackbone(nn.Module):
         self.add_cls_token = False
         self.add_sep_seg = False
 
+        self.search_grid_size = None
+        self.template_grid_size = None
+
     def finetune_track(self, cfg, patch_start_index=1):
 
         search_size = to_2tuple(cfg.DATA.SEARCH.SIZE)
@@ -70,6 +73,7 @@ class BaseBackbone(nn.Module):
         # for search region
         H, W = search_size
         new_P_H, new_P_W = H // new_patch_size, W // new_patch_size
+        self.search_grid_size = tuple([new_P_H, new_P_W])
         search_patch_pos_embed = nn.functional.interpolate(patch_pos_embed, size=(new_P_H, new_P_W), mode='bicubic',
                                                            align_corners=False)
         search_patch_pos_embed = search_patch_pos_embed.flatten(2).transpose(1, 2)
@@ -77,6 +81,7 @@ class BaseBackbone(nn.Module):
         # for template region
         H, W = template_size
         new_P_H, new_P_W = H // new_patch_size, W // new_patch_size
+        self.template_grid_size = tuple([new_P_H, new_P_W])
         template_patch_pos_embed = nn.functional.interpolate(patch_pos_embed, size=(new_P_H, new_P_W), mode='bicubic',
                                                              align_corners=False)
         template_patch_pos_embed = template_patch_pos_embed.flatten(2).transpose(1, 2)

@@ -174,3 +174,7 @@ pretrained
 output
 
 tensorboard
+
+lib/test/tracking_results
+
+*.txt

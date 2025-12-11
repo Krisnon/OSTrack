@@ -5,6 +5,7 @@ import torch
 from lib.utils.merge import merge_template_search
 from ...utils.heapmap_utils import generate_heatmap
 from ...utils.ce_utils import generate_mask_cond, adjust_keep_rate
+from collections import OrderedDict ### NEW ###
 
 
 class OSTrackActor(BaseActor):
@@ -27,58 +28,125 @@ class OSTrackActor(BaseActor):
             loss    - the training loss
             status  -  dict containing detailed losses
         """
-        # forward pass
-        out_dict = self.forward_pass(data)
+        
+        ### --- MODIFIED: Implement temporal unrolling loop --- ###
+        is_training = self.net.training
+        
+        # 1. Get static template T_0
+        # (N_t, B, C, H, W) --> (B, C, H, W)
+        # We assume N_t = 1 (static template)
+        assert len(data['template_images']) == 1, "Only support 1 template image"
+        template_t0 = data['template_images'][0].view(-1, *data['template_images'].shape[2:])
 
-        # compute losses
-        loss, status = self.compute_losses(out_dict, data)
-
-        return loss, status
-
-    def forward_pass(self, data):
-        # currently only support 1 template and 1 search region
-        assert len(data['template_images']) == 1
-        assert len(data['search_images']) == 1
-
-        template_list = []
-        for i in range(self.settings.num_template):
-            template_img_i = data['template_images'][i].view(-1,
-                                                             *data['template_images'].shape[2:])  # (batch, 3, 128, 128)
-            # template_att_i = data['template_att'][i].view(-1, *data['template_att'].shape[2:])  # (batch, 128, 128)
-            template_list.append(template_img_i)
-
-        search_img = data['search_images'][0].view(-1, *data['search_images'].shape[2:])  # (batch, 3, 320, 320)
-        # search_att = data['search_att'][0].view(-1, *data['search_att'].shape[2:])  # (batch, 320, 320)
-
+        # 2. Get search image sequence
+        # (N_s, B, C, H, W)
+        search_images = data['search_images']
+        gt_bboxes = data['search_anno'] # (N_s, B, 4)
+        
+        num_sequence = search_images.shape[0] # N_s
+        
+        # 3. Get static CE parameters
         box_mask_z = None
         ce_keep_rate = None
         if self.cfg.MODEL.BACKBONE.CE_LOC:
-            box_mask_z = generate_mask_cond(self.cfg, template_list[0].shape[0], template_list[0].device,
+            box_mask_z = generate_mask_cond(self.cfg, template_t0.shape[0], template_t0.device,
                                             data['template_anno'][0])
 
             ce_start_epoch = self.cfg.TRAIN.CE_START_EPOCH
             ce_warm_epoch = self.cfg.TRAIN.CE_WARM_EPOCH
             ce_keep_rate = adjust_keep_rate(data['epoch'], warmup_epochs=ce_start_epoch,
                                                 total_epochs=ce_start_epoch + ce_warm_epoch,
-                                                ITERS_PER_EPOCH=1,
+                                                ITERS_PER_EPOCH=1, # This might need adjustment
                                                 base_keep_rate=self.cfg.MODEL.BACKBONE.CE_KEEP_RATIO[0])
 
-        if len(template_list) == 1:
-            template_list = template_list[0]
+        # 4. Initialize loop state
+        temporal_data = None
+        total_loss = 0.0
+        all_status_dicts = []
+        if is_training:
+            self.optimizer.zero_grad()
 
-        out_dict = self.net(template=template_list,
-                            search=search_img,
+        # 5. Unroll the sequence
+        for t in range(num_sequence):
+            # Get data for time step t
+            search_t = search_images[t].view(-1, *search_images.shape[2:]) # (B, C, H, W)
+            gt_bbox_t = gt_bboxes[t] # (B, 4)
+            
+            # Forward pass for one time step
+            out_dict = self.forward_pass(template_t0, search_t, gt_bbox_t, 
+                                         temporal_data, box_mask_z, ce_keep_rate)
+            
+            # Compute losses for one time step
+            loss_t, status_t = self.compute_losses(out_dict, gt_bbox_t)
+
+            mean_loss_t = loss_t / num_sequence
+            if is_training:
+                mean_loss_t.backward()
+            
+            # Accumulate loss and update state
+            total_loss += mean_loss_t.item()
+            all_status_dicts.append(status_t)
+            
+            if out_dict.get('next_temporal_data', None) is not None:
+                temporal_data = {
+                    'features': out_dict['next_temporal_data']['features'].detach(),
+                    'confidence': out_dict['next_temporal_data']['confidence'].detach(),
+                    'reliability': out_dict['next_temporal_data']['reliability'].detach(),
+                }
+            else:
+                temporal_data = None
+
+        # 6. Compute average loss and status
+        mean_loss = total_loss
+        
+        # Aggregate status dicts
+        mean_status = all_status_dicts[0]
+        if num_sequence > 1:
+            for key in mean_status.keys():
+                # Sum up all values for this key
+                sum_val = sum(s[key] for s in all_status_dicts)
+                mean_status[key] = sum_val / num_sequence
+
+        return mean_loss, mean_status
+        ### --- END MODIFIED --- ###
+
+    def forward_pass(self, template, search, gt_bbox, temporal_data, box_mask_z, ce_keep_rate):
+        """
+        Modified to run one time step.
+        """
+        
+        ### --- MODIFIED --- ###
+        if isinstance(template, list):
+             # This actor was built assuming a list of templates
+             # Our new logic provides a single T_0
+             template = template[0] 
+        ### --- END MODIFIED --- ###
+
+        out_dict = self.net(template=template,
+                            search=search,
+                            gt_bboxes=gt_bbox, # Pass GT box for RoIAlign
+                            temporal_data=temporal_data, # Pass t-1 state
                             ce_template_mask=box_mask_z,
                             ce_keep_rate=ce_keep_rate,
                             return_last_attn=False)
 
         return out_dict
 
-    def compute_losses(self, pred_dict, gt_dict, return_status=True):
+    def compute_losses(self, pred_dict, gt_bbox, return_status=True):
+        """
+        Modified to accept a single GT BBox [B, 4]
+        """
+        
         # gt gaussian map
-        gt_bbox = gt_dict['search_anno'][-1]  # (Ns, batch, 4) (x1,y1,w,h) -> (batch, 4)
-        gt_gaussian_maps = generate_heatmap(gt_dict['search_anno'], self.cfg.DATA.SEARCH.SIZE, self.cfg.MODEL.BACKBONE.STRIDE)
-        gt_gaussian_maps = gt_gaussian_maps[-1].unsqueeze(1)
+        ### --- MODIFIED --- ###
+        # gt_bbox = gt_dict['search_anno'][-1]  # (Ns, batch, 4) (x1,y1,w,h) -> (batch, 4)
+        # We now receive gt_bbox [B, 4] directly
+        
+        # generate_heatmap expects a list of (B, 4) tensors
+        gt_gaussian_maps = generate_heatmap([gt_bbox], self.cfg.DATA.SEARCH.SIZE, self.cfg.MODEL.BACKBONE.STRIDE)
+        gt_gaussian_maps = gt_gaussian_maps[0].unsqueeze(1) # [B, 1, H, W]
+        ### --- END MODIFIED --- ###
+
 
         # Get boxes
         pred_boxes = pred_dict['pred_boxes']
@@ -105,11 +173,11 @@ class OSTrackActor(BaseActor):
         if return_status:
             # status for log
             mean_iou = iou.detach().mean()
-            status = {"Loss/total": loss.item(),
+            status = OrderedDict({"Loss/total": loss.item(),
                       "Loss/giou": giou_loss.item(),
                       "Loss/l1": l1_loss.item(),
                       "Loss/location": location_loss.item(),
-                      "IoU": mean_iou.item()}
+                      "IoU": mean_iou.item()})
             return loss, status
         else:
             return loss

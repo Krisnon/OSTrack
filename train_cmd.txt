@@ -1,1 +1,1 @@
-python tracking/train.py --script ostrack --config zyw_idea_lr_adj --save_dir ./output/mae_distill_tiny_zyw_lr_ce --mode multiple --nproc_per_node 3 --use_wandb 0
+python tracking/train.py --script ostrack --config vit_tiny_256_mae_ce_32x4_ep300 --save_dir ./output/mae_distill_tiny_lrx3 --mode multiple --nproc_per_node 4 --use_wandb 0

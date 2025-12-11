@@ -9,7 +9,7 @@ DATA:
     FACTOR: 4.0
     SCALE_JITTER: 0.25
     SIZE: 256
-    NUMBER: 1
+    NUMBER: 4
   STD:
   - 0.229
   - 0.224
@@ -25,6 +25,8 @@ DATA:
 #    DATASETS_RATIO:
 #      - 1
 #    SAMPLE_PER_EPOCH: 60000
+  SAMPLER_MODE: 'hybrid'
+  HYBRID_SEQ_PROB: 0.5
 
   TRAIN:
     DATASETS_NAME:
@@ -45,7 +47,7 @@ DATA:
     - 1
     SAMPLE_PER_EPOCH: 10000
 MODEL:
-  PRETRAIN_FILE: "mae_tiny_distill_D2_8_new.pth.tar"
+  PRETRAIN_FILE: "/mnt/data_jmyan/Projects/OSTrack/pretrained/OSTrack_pretrained.tar"
   EXTRA_MERGER: False
   RETURN_INTER: False
   BACKBONE:
@@ -57,6 +59,11 @@ MODEL:
   HEAD:
     TYPE: CENTER
     NUM_CHANNELS: 256
+  TEMPORAL:                   # <<< NEW
+    STORE_LOC: [5]             # <<< NEW (在第12个block后存储 F_t)
+    ENHANCE_LOC: [5]            # <<< NEW (在第9个block前注入 R_{t-1})
+    ROI_SIZE: 5                 # <<< NEW (RoIAlign 的输出尺寸 K=5, 即 5x5)
+  
 TRAIN:
   BACKBONE_MULTIPLIER: 0.1
   DROP_PATH_RATE: 0.1
@@ -67,7 +74,7 @@ TRAIN:
   GIOU_WEIGHT: 2.0
   L1_WEIGHT: 5.0
   GRAD_CLIP_NORM: 0.1
-  LR: 0.0002
+  LR: 0.0001
   LR_DROP_EPOCH: 240
   NUM_WORKER: 8
   OPTIMIZER: ADAMW

@@ -21,7 +21,7 @@ def parameters(yaml_name: str):
     params.search_size = cfg.TEST.SEARCH_SIZE
 
     # Network checkpoint path
-    params.checkpoint = os.path.join(save_dir, "checkpoints/train/ostrack/%s/OSTrack_ep%04d.pth.tar" %
+    params.checkpoint = os.path.join(save_dir, "mae_distill_tiny_memory_lrx1_8_8/checkpoints/train/ostrack/%s/OSTrack_ep%04d.pth.tar" %
                                      (yaml_name, cfg.TEST.EPOCH))
 
     # whether to save boxes from all queries

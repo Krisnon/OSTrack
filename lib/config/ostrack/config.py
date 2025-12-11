@@ -34,6 +34,12 @@ cfg.MODEL.HEAD = edict()
 cfg.MODEL.HEAD.TYPE = "CENTER"
 cfg.MODEL.HEAD.NUM_CHANNELS = 256
 
+# MODEL.TEMPORAL
+cfg.MODEL.TEMPORAL = edict()
+cfg.MODEL.TEMPORAL.STORE_LOC = []
+cfg.MODEL.TEMPORAL.ENHANCE_LOC = []
+cfg.MODEL.TEMPORAL.ROI_SIZE = 5
+
 # TRAIN
 cfg.TRAIN = edict()
 cfg.TRAIN.LR = 0.0001
@@ -61,9 +67,12 @@ cfg.TRAIN.SCHEDULER = edict()
 cfg.TRAIN.SCHEDULER.TYPE = "step"
 cfg.TRAIN.SCHEDULER.DECAY_RATE = 0.1
 
+cfg.TRAIN.USE_TEACHER_FORCING = False
+
 # DATA
 cfg.DATA = edict()
 cfg.DATA.SAMPLER_MODE = "causal"  # sampling methods
+cfg.DATA.HYBRID_SEQ_PROB = 0
 cfg.DATA.MEAN = [0.485, 0.456, 0.406]
 cfg.DATA.STD = [0.229, 0.224, 0.225]
 cfg.DATA.MAX_SAMPLE_INTERVAL = 200
@@ -99,7 +108,6 @@ cfg.TEST.TEMPLATE_SIZE = 128
 cfg.TEST.SEARCH_FACTOR = 5.0
 cfg.TEST.SEARCH_SIZE = 320
 cfg.TEST.EPOCH = 500
-
 
 def _edict2dict(dest_dict, src_edict):
     if isinstance(dest_dict, dict) and isinstance(src_edict, dict):

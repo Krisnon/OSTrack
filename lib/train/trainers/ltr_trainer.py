@@ -28,6 +28,8 @@ class LTRTrainer(BaseTrainer):
         """
         super().__init__(actor, loaders, optimizer, settings, lr_scheduler)
 
+        self.actor.optimizer = optimizer
+
         self._set_default_settings()
 
         # Initialize statistics variables
@@ -83,21 +85,20 @@ class LTRTrainer(BaseTrainer):
             data['settings'] = self.settings
             # forward pass
             if not self.use_amp:
-                loss, stats = self.actor(data)
+                loss_item, stats = self.actor(data)
+                loss_for_print = torch.tensor(loss_item)
             else:
                 with autocast():
-                    loss, stats = self.actor(data)
+                    loss_item, stats = self.actor(data)
+                    loss_for_print = torch.tensor(loss_item)
 
             # backward pass and update weights
             if loader.training:
-                self.optimizer.zero_grad()
                 if not self.use_amp:
-                    loss.backward()
                     if self.settings.grad_clip_norm > 0:
                         torch.nn.utils.clip_grad_norm_(self.actor.net.parameters(), self.settings.grad_clip_norm)
                     self.optimizer.step()
                 else:
-                    self.scaler.scale(loss).backward()
                     if self.settings.grad_clip_norm > 0:
                         self.scaler.unscale_(self.optimizer)
                         torch.nn.utils.clip_grad_norm_(self.actor.net.parameters(), self.settings.grad_clip_norm)
@@ -106,7 +107,7 @@ class LTRTrainer(BaseTrainer):
 
             # update statistics
             batch_size = data['template_images'].shape[loader.stack_dim]
-            self._update_stats(stats, batch_size, loader)
+            self._update_stats(stats, batch_size, loader, loss_for_print)
 
             # print statistics
             self._print_stats(i, loader, batch_size)
@@ -144,10 +145,17 @@ class LTRTrainer(BaseTrainer):
         self.avg_gpu_trans_time = 0
         self.avg_forward_time = 0
 
-    def _update_stats(self, new_stats: OrderedDict, batch_size, loader):
+    def _update_stats(self, new_stats: OrderedDict, batch_size, loader, loss=None):
         # Initialize stats if not initialized yet
         if loader.name not in self.stats.keys() or self.stats[loader.name] is None:
             self.stats[loader.name] = OrderedDict({name: AverageMeter() for name in new_stats.keys()})
+
+        # --- MODIFIED: loss 不再在 new_stats 里 ---
+        if loss is not None and 'Loss/total' not in self.stats[loader.name]:
+             self.stats[loader.name]['Loss/total'] = AverageMeter()
+        if loss is not None:
+             self.stats[loader.name]['Loss/total'].update(loss.item(), batch_size)
+        # --- END MODIFIED ---
 
         # add lr state
         if loader.training:

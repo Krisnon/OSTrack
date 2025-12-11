@@ -118,21 +118,15 @@ def build_dataloaders(cfg, settings):
     # Train sampler and loader
     settings.num_template = getattr(cfg.DATA.TEMPLATE, "NUMBER", 1)
     settings.num_search = getattr(cfg.DATA.SEARCH, "NUMBER", 1)
-    sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal") ### <<< MODIFIED (Name change)
+    sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
     train_cls = getattr(cfg.TRAIN, "TRAIN_CLS", False)
     print("sampler_mode", sampler_mode)
-    
-    ### --- MODIFIED: Added hybrid_seq_prob --- ###
-    hybrid_seq_prob = getattr(cfg.DATA, "HYBRID_SEQ_PROB", 0.5)
-    
     dataset_train = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader),
                                             p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
                                             samples_per_epoch=cfg.DATA.TRAIN.SAMPLE_PER_EPOCH,
                                             max_gap=cfg.DATA.MAX_SAMPLE_INTERVAL, num_search_frames=settings.num_search,
                                             num_template_frames=settings.num_template, processing=data_processing_train,
-                                            frame_sample_mode=sampler_mode, train_cls=train_cls,
-                                            hybrid_seq_prob=hybrid_seq_prob) # <<< NEW
-    ### --- END MODIFIED --- ###
+                                            frame_sample_mode=sampler_mode, train_cls=train_cls)
 
     train_sampler = DistributedSampler(dataset_train) if settings.local_rank != -1 else None
     shuffle = False if settings.local_rank != -1 else True
@@ -146,8 +140,7 @@ def build_dataloaders(cfg, settings):
                                           samples_per_epoch=cfg.DATA.VAL.SAMPLE_PER_EPOCH,
                                           max_gap=cfg.DATA.MAX_SAMPLE_INTERVAL, num_search_frames=settings.num_search,
                                           num_template_frames=settings.num_template, processing=data_processing_val,
-                                          frame_sample_mode=sampler_mode, train_cls=train_cls,
-                                          hybrid_seq_prob=hybrid_seq_prob) # <<< NEW
+                                          frame_sample_mode=sampler_mode, train_cls=train_cls)
     val_sampler = DistributedSampler(dataset_val) if settings.local_rank != -1 else None
     loader_val = LTRLoader('val', dataset_val, training=False, batch_size=cfg.TRAIN.BATCH_SIZE,
                            num_workers=cfg.TRAIN.NUM_WORKER, drop_last=True, stack_dim=1, sampler=val_sampler,

@@ -9,7 +9,7 @@ DATA:
     FACTOR: 4.0
     SCALE_JITTER: 0.25
     SIZE: 256
-    NUMBER: 1
+    NUMBER: 3
   STD:
   - 0.229
   - 0.224
@@ -25,6 +25,8 @@ DATA:
 #    DATASETS_RATIO:
 #      - 1
 #    SAMPLE_PER_EPOCH: 60000
+  SAMPLER_MODE: 'hybrid'
+  HYBRID_SEQ_PROB: 0.5
 
   TRAIN:
     DATASETS_NAME:
@@ -57,17 +59,22 @@ MODEL:
   HEAD:
     TYPE: CENTER
     NUM_CHANNELS: 256
+  TEMPORAL:                   # <<< NEW
+    STORE_LOC: [8]             # <<< NEW (在第12个block后存储 F_t)
+    ENHANCE_LOC: [8]            # <<< NEW (在第9个block前注入 R_{t-1})
+    ROI_SIZE: 5                 # <<< NEW (RoIAlign 的输出尺寸 K=5, 即 5x5)
+  
 TRAIN:
   BACKBONE_MULTIPLIER: 0.1
   DROP_PATH_RATE: 0.1
   CE_START_EPOCH: 20  # candidate elimination start epoch
   CE_WARM_EPOCH: 80  # candidate elimination warm up epoch
-  BATCH_SIZE: 96
+  BATCH_SIZE: 1
   EPOCH: 400
   GIOU_WEIGHT: 2.0
   L1_WEIGHT: 5.0
   GRAD_CLIP_NORM: 0.1
-  LR: 0.0002
+  LR: 0.0004
   LR_DROP_EPOCH: 240
   NUM_WORKER: 8
   OPTIMIZER: ADAMW

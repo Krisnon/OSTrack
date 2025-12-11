@@ -38,6 +38,7 @@ def run_training(script_name, config_name, cudnn_benchmark=True, local_rank=-1, 
     cv.setNumThreads(0)
 
     torch.backends.cudnn.benchmark = cudnn_benchmark
+    torch.autograd.set_detect_anomaly(True)
 
     print('script_name: {}.py  config_name: {}.yaml'.format(script_name, config_name))
 
