@@ -21,7 +21,8 @@ class OSTrack(nn.Module):
     """ This is the base class for OSTrack """
 
     def __init__(self, transformer, box_head, aux_loss=False, head_type="CORNER",
-                 backbone_stride=16, temporal_roi_size=5, use_teacher_forcing=False): ### MODIFIED ###
+                 backbone_stride=16, temporal_roi_size=5, 
+                 use_teacher_forcing=False, roi_jitter_scale=0.0): ### MODIFIED ###
         """ Initializes the model.
         Parameters:
             transformer: torch module of the transformer architecture.
@@ -47,6 +48,10 @@ class OSTrack(nn.Module):
         self.backbone_stride = backbone_stride
         self.temporal_roi_size = temporal_roi_size
         self.use_teacher_forcing = use_teacher_forcing
+        ### --- END NEW --- ###
+
+        ### --- NEW：Jitter Parameters --- ###
+        self.roi_jitter_scale = roi_jitter_scale
         ### --- END NEW --- ###
 
     def forward(self, template: torch.Tensor,
@@ -91,6 +96,24 @@ class OSTrack(nn.Module):
             else:
                 # Use the model's own prediction (self-regression)
                 roi_bboxes_cxcywh = out['pred_boxes'].squeeze(1) * img_sz # Un-normalize from 0-1
+
+            ### --- NEW: Apply Random Jitter (Robustness) --- ###
+            # Only apply jitter during training to simulate tracking errors
+            if self.training and self.roi_jitter_scale > 0:
+                # roi_bboxes_cxcywh: [B, 4] -> cx, cy, w, h
+                # Generate random noise in range [-1, 1]
+                noise = (torch.rand_like(roi_bboxes_cxcywh) - 0.5) * 2.0 
+                
+                # Jitter Position (cx, cy): shift relative to box size
+                # e.g. cx_new = cx + noise * scale * w
+                roi_bboxes_cxcywh[:, 0] += noise[:, 0] * self.roi_jitter_scale * roi_bboxes_cxcywh[:, 2]
+                roi_bboxes_cxcywh[:, 1] += noise[:, 1] * self.roi_jitter_scale * roi_bboxes_cxcywh[:, 3]
+                
+                # Jitter Size (w, h): scale box
+                # e.g. w_new = w * (1 + noise * scale)
+                roi_bboxes_cxcywh[:, 2] *= (1.0 + noise[:, 2] * self.roi_jitter_scale)
+                roi_bboxes_cxcywh[:, 3] *= (1.0 + noise[:, 3] * self.roi_jitter_scale)
+            ### --- END NEW --- ###
             
             # 3. Get confidence score
             # We take the max value from the score map as the confidence
@@ -231,6 +254,7 @@ def build_ostrack(cfg, training=True):
                                         #    img_size=cfg.DATA.SEARCH.SIZE,
                                            store_feature_loc=cfg.MODEL.TEMPORAL.STORE_LOC,
                                            temporal_enhance_loc=cfg.MODEL.TEMPORAL.ENHANCE_LOC,
+                                           freeze_backbone=cfg.TRAIN.FREEZE_BACKBONE
                                            )
         hidden_dim = backbone.embed_dim
         patch_start_index = 1
@@ -242,6 +266,11 @@ def build_ostrack(cfg, training=True):
 
     box_head = build_box_head(cfg, hidden_dim)
 
+    ### --- NEW: Get jitter scale from CFG or Default --- ###
+    # 尝试从 CFG 读取，如果没有则默认为 0.0 (关闭) 或 0.1 (开启)
+    roi_jitter_scale = getattr(cfg.TRAIN, "ROI_JITTER_SCALE", 0.0)
+    ### --- END NEW --- ###
+
     ### --- MODIFIED: Pass temporal params to OSTrack --- ###
     model = OSTrack(
         backbone,
@@ -250,7 +279,8 @@ def build_ostrack(cfg, training=True):
         head_type=cfg.MODEL.HEAD.TYPE,
         backbone_stride=backbone_stride,
         temporal_roi_size=cfg.MODEL.TEMPORAL.ROI_SIZE,
-        use_teacher_forcing=cfg.TRAIN.USE_TEACHER_FORCING
+        use_teacher_forcing=cfg.TRAIN.USE_TEACHER_FORCING,
+        roi_jitter_scale=roi_jitter_scale
     )
     ### --- END MODIFIED --- ###
 

@@ -158,7 +158,8 @@ class VisionTransformerCEF(VisionTransformer):
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
                  act_layer=None, weight_init='',
                  ce_loc=None, ce_keep_ratio=None,
-                 store_feature_loc=None, temporal_enhance_loc=None): ### --- MODIFIED --- ###
+                 store_feature_loc=None, temporal_enhance_loc=None,
+                 freeze_backbone=False): ### --- MODIFIED --- ###
         """
         Args:
             img_size (int, tuple): input image size
@@ -180,6 +181,7 @@ class VisionTransformerCEF(VisionTransformer):
             weight_init: (str): weight init scheme
             store_feature_loc (list): (NEW) list of block indices to store features from.
             temporal_enhance_loc (list): (NEW) list of block indices to inject temporal features.
+            freeze_backbone (bool): (NEW) Whether to freeze the ViT backbone parameters.
         """
         # super().__init__()
         super().__init__()
@@ -251,6 +253,18 @@ class VisionTransformerCEF(VisionTransformer):
         ### --- END NEW --- ###
 
         self.init_weights(weight_init)
+
+        ### --- NEW: Freeze Backbone Logic --- ###
+        if freeze_backbone:
+            _logger.info("Freezing backbone parameters (ViT), keeping Temporal Enhancer trainable.")
+            for name, param in self.named_parameters():
+                # 核心逻辑：如果参数名中包含 'temporal_enhancers'，则保留梯度（可训练）
+                # 否则（属于 patch_embed, blocks, pos_embed, cls_token 等），冻结梯度
+                if 'temporal_enhancers' in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+        ### --- END NEW --- ###
 
     def forward_features(self, z, x, mask_z=None, mask_x=None,
                          ce_template_mask=None, ce_keep_rate=None,
