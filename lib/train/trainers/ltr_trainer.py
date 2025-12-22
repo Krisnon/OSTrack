@@ -14,6 +14,8 @@ from torch.cuda.amp import GradScaler
 
 from lib.utils.misc import get_world_size
 
+import requests
+
 
 class LTRTrainer(BaseTrainer):
     def __init__(self, actor, loaders, optimizer, settings, lr_scheduler=None, use_amp=False):
@@ -124,6 +126,15 @@ class LTRTrainer(BaseTrainer):
         print("Avg GPU Trans Time: %.5f" % (self.avg_gpu_trans_time / self.num_frames * batch_size))
         print("Avg Forward Time: %.5f" % (self.avg_forward_time / self.num_frames * batch_size))
 
+        if self.epoch == 30:
+            content = "训练start"
+            title = "start training notice"
+            send_pushplus(content, title)
+        elif self.epoch % 40 == 0:
+            content = "请规划下一步训练"
+            title = "第" + str(self.epoch) + "轮训练结束通知"
+            send_pushplus(content, title)
+
     def train_epoch(self):
         """Do one epoch for each loader."""
         for loader in self.loaders:
@@ -233,3 +244,14 @@ class LTRTrainer(BaseTrainer):
             self.tensorboard_writer.write_info(self.settings.script_name, self.settings.description)
 
         self.tensorboard_writer.write_epoch(self.stats, self.epoch)
+
+def send_pushplus(content, title):
+    token = '5179af1d791d4be89488a83ca2ee2adb' # 在 PushPlus 官网获取
+    url = 'http://www.pushplus.plus/send/' + token
+    data = {
+        "token": token,
+        "title": title,
+        "content": content,
+        "channel": "mail"
+    }
+    requests.post(url, json=data)

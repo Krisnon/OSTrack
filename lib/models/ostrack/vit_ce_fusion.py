@@ -158,8 +158,7 @@ class VisionTransformerCEF(VisionTransformer):
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
                  act_layer=None, weight_init='',
                  ce_loc=None, ce_keep_ratio=None,
-                 store_feature_loc=None, temporal_enhance_loc=None,
-                 freeze_backbone=False): ### --- MODIFIED --- ###
+                 store_feature_loc=None, temporal_enhance_loc=None): ### --- MODIFIED --- ###
         """
         Args:
             img_size (int, tuple): input image size
@@ -253,18 +252,6 @@ class VisionTransformerCEF(VisionTransformer):
         ### --- END NEW --- ###
 
         self.init_weights(weight_init)
-
-        ### --- NEW: Freeze Backbone Logic --- ###
-        if freeze_backbone:
-            _logger.info("Freezing backbone parameters (ViT), keeping Temporal Enhancer trainable.")
-            for name, param in self.named_parameters():
-                # 核心逻辑：如果参数名中包含 'temporal_enhancers'，则保留梯度（可训练）
-                # 否则（属于 patch_embed, blocks, pos_embed, cls_token 等），冻结梯度
-                if 'temporal_enhancers' in name:
-                    param.requires_grad = True
-                else:
-                    param.requires_grad = False
-        ### --- END NEW --- ###
 
     def forward_features(self, z, x, mask_z=None, mask_x=None,
                          ce_template_mask=None, ce_keep_rate=None,
@@ -440,6 +427,52 @@ class VisionTransformerCEF(VisionTransformer):
                                             temporal_data=temporal_data) ### --- MODIFIED --- ###
 
         return x, aux_dict
+
+    # --- 新增的辅助函数 ---
+    def display_trainable_info(self):
+        """
+        统计并打印模型的可训练参数与冻结参数概览
+        """
+        total_params = 0
+        trainable_params = 0
+        trainable_names = set()
+        
+        print("\n" + "=" * 60)
+        print(f"{'Model Parameter Configuration':^60}")
+        print("=" * 60)
+
+        for name, param in self.named_parameters():
+            num = param.numel()
+            total_params += num
+            
+            if param.requires_grad:
+                trainable_params += num
+                # 为了防止打印列表过长，进行简单的层级聚合
+                # 例如 blocks.0.norm1.weight -> blocks.0
+                # temporal_enhancers.0.cross_attn... -> temporal_enhancers.0
+                parts = name.split('.')
+                if len(parts) >= 2:
+                    group_name = f"{parts[0]}.{parts[1]}"
+                else:
+                    group_name = parts[0]
+                trainable_names.add(group_name)
+
+        frozen_params = total_params - trainable_params
+        trainable_ratio = (trainable_params / total_params) * 100 if total_params > 0 else 0
+
+        # 打印统计数据
+        print(f"Total Parameters:     {total_params / 1e6:.2f} M")
+        print(f"Frozen Parameters:    {frozen_params / 1e6:.2f} M")
+        print(f"Trainable Parameters: {trainable_params / 1e6:.2f} M ({trainable_ratio:.2f}%)")
+        
+        # 打印可训练模块概览
+        print("-" * 60)
+        print("Trainable Modules (Grouped):")
+        # 排序让输出更好看
+        for name in sorted(list(trainable_names)):
+            print(f"  -> {name}.*")
+            
+        print("=" * 60 + "\n")
 
 
 def _create_vision_transformer_cef(pretrained=False, **kwargs):

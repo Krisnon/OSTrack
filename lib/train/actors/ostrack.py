@@ -80,6 +80,7 @@ class OSTrackActor(BaseActor):
             loss_t, status_t = self.compute_losses(out_dict, gt_bbox_t)
 
             mean_loss_t = loss_t / num_sequence
+            
             if is_training:
                 mean_loss_t.backward()
             

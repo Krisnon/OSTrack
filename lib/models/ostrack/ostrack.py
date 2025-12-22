@@ -253,8 +253,7 @@ def build_ostrack(cfg, training=True):
                                            ### --- NEW: Pass temporal params to backbone --- ###
                                         #    img_size=cfg.DATA.SEARCH.SIZE,
                                            store_feature_loc=cfg.MODEL.TEMPORAL.STORE_LOC,
-                                           temporal_enhance_loc=cfg.MODEL.TEMPORAL.ENHANCE_LOC,
-                                           freeze_backbone=cfg.TRAIN.FREEZE_BACKBONE
+                                           temporal_enhance_loc=cfg.MODEL.TEMPORAL.ENHANCE_LOC
                                            )
         hidden_dim = backbone.embed_dim
         patch_start_index = 1
@@ -291,5 +290,18 @@ def build_ostrack(cfg, training=True):
         ### --- NEW: Print missing keys to verify --- ###
         print("Missing keys:", missing_keys)
         print("Unexpected keys:", unexpected_keys)
+
+    # NEW : Freeze some parameters
+    print("\n" + "=" * 40)
+    print("   INFO: Freezing All Pretrained Parameters")
+    print("=" * 40 + "\n")
+    
+    for name, param in model.named_parameters():
+        if 'temporal_enhancers' in name:
+            param.requires_grad = True
+        elif 'norm' in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
 
     return model
