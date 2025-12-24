@@ -3,12 +3,14 @@ Basic OSTrack model.
 """
 import math
 import os
+import sys
 from typing import List
 
 import torch
 from torch import nn
 from torch.nn.modules.transformer import _get_clones
 from torchvision.ops import roi_align ### NEW ###
+from torchinfo import summary
 
 from lib.models.layers.head import build_box_head
 from lib.models.ostrack.vit import vit_base_patch16_224
@@ -299,9 +301,11 @@ def build_ostrack(cfg, training=True):
     for name, param in model.named_parameters():
         if 'temporal_enhancers' in name:
             param.requires_grad = True
-        elif 'norm' in name:
+        elif 'backbone.norm' in name:
             param.requires_grad = True
         else:
             param.requires_grad = False
+
+    summary(model, [(1, 3, 128, 128), (1, 3, 256, 256)], depth=3)
 
     return model

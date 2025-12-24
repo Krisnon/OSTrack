@@ -254,4 +254,18 @@ def send_pushplus(content, title):
         "content": content,
         "channel": "mail"
     }
-    requests.post(url, json=data)
+    
+    try:
+        # 设置 timeout=5，表示如果 5 秒内无法连接或接收数据，就抛出异常
+        response = requests.post(url, json=data, timeout=5)
+        
+        # 可选：检查 HTTP 状态码，如果不是 200 也抛出异常
+        response.raise_for_status() 
+        
+    except requests.exceptions.RequestException as e:
+        # 捕获所有与 requests 相关的异常（连接超时、DNS 错误、拒绝连接等）
+        # 这里只打印错误信息，程序会继续往下运行，不会崩溃
+        print(f"【推送失败】网络请求出现错误: {e}")
+    except Exception as e:
+        # 捕获其他未知异常
+        print(f"【推送失败】发生未知错误: {e}")
