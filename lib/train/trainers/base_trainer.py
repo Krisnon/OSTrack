@@ -79,6 +79,11 @@ class BaseTrainer:
                 if distill:
                     directory_teacher = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path_teacher)
                     self.load_state_dict(directory_teacher, distill=True)
+                # 在进入训练循环前保存一次 Checkpoint (保存初始权重)
+                if self._checkpoint_dir:
+                    if self.settings.local_rank in [-1, 0]:
+                        print('Saving checkpoint before training starts...')
+                        self.save_checkpoint()
                 for epoch in range(self.epoch+1, max_epochs+1):
                     self.epoch = epoch
 

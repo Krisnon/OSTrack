@@ -19,20 +19,21 @@ _logger = logging.getLogger(__name__)
 
 ### --- NEW: Temporal Enhancer Module --- ###
 class TemporalEnhancer(nn.Module):
-    """
-    Temporal Enhancement block using Cross-Attention and Gating.
-    """
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=True, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         
-        # 1. Feature Enhancement Module (Cross-Attention)
-        self.norm_q = norm_layer(dim)  # Norm for Query (Current Template)
-        self.norm_kv = norm_layer(dim) # Norm for Key/Value (Previous Result)
+        # 1. Feature Enhancement (Cross-Attention)
+        self.norm_q = norm_layer(dim)
+        self.norm_kv = norm_layer(dim)
         self.cross_attn = nn.MultiheadAttention(dim, num_heads, dropout=attn_drop, bias=qkv_bias, batch_first=True)
         
-        # 2. Confidence Assessment Module (Gating)
-        # This small MLP learns an "internal" confidence score
+        # 2. 独立的 FFN (可选，但推荐，为了让时序特征更成熟)
+        # 如果觉得参数量太大，可以把 mlp_ratio 设小一点，比如 2.0 或 1.0
+        self.norm_enhance = norm_layer(dim)
+        self.enhance_ffn = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop)
+        
+        # 3. Gate MLP (计算融合权重)
         gate_hidden_dim = int(dim * 0.25)
         self.gate_mlp = nn.Sequential(
             nn.Linear(dim, gate_hidden_dim),
@@ -41,85 +42,52 @@ class TemporalEnhancer(nn.Module):
             nn.Sigmoid()
         )
         
-        # Standard Transformer block components
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_features = int(dim * mlp_ratio)
-        self.ffn = Mlp(in_features=dim, hidden_features=mlp_hidden_features, act_layer=act_layer, drop=drop)
 
-        # zero initialization
         self._init_weights()
 
     def _init_weights(self):
-        """
-        Apply Zero-Initialization to ensure the module acts as an Identity function 
-        at the start of training.
-        """
-        # 1. Zero-init Cross-Attention Output Projection
-        # 这样 attn_output 和 delta_t 在初始时全为 0
+        # Zero-init Cross-Attention
         nn.init.constant_(self.cross_attn.out_proj.weight, 0)
         nn.init.constant_(self.cross_attn.out_proj.bias, 0)
+        
+        # Zero-init Enhance FFN
+        if hasattr(self.enhance_ffn, 'fc2'):
+            nn.init.constant_(self.enhance_ffn.fc2.weight, 0)
+            nn.init.constant_(self.enhance_ffn.fc2.bias, 0)
 
-        # 2. Zero-init FFN Final Projection
-        # 这样 FFN 的输出在初始时全为 0
-        # 注意：这里假设使用的是 timm.models.layers.Mlp，最后一层通常是 fc2
-        if hasattr(self.ffn, 'fc2'):
-            nn.init.constant_(self.ffn.fc2.weight, 0)
-            nn.init.constant_(self.ffn.fc2.bias, 0)
-        elif hasattr(self.ffn, 'layers') and isinstance(self.ffn.layers[-1], nn.Linear):
-             # 如果是自定义的 Sequential Mlp
-             nn.init.constant_(self.ffn.layers[-1].weight, 0)
-             nn.init.constant_(self.ffn.layers[-1].bias, 0)
-
-        # 3. (可选) Zero-init Gate MLP 的最后一层 Linear
-        # 虽然 delta_t 已经是 0 了，Gate 的值在初始时并不重要（0 * 任何数 = 0），
-        # 但通常也会初始化 Gate 使其趋向于平滑。
-        # 这里我们将 Gate 的最后一层 Linear 初始化为 0，这会导致 Sigmoid 输入为 0，输出为 0.5。
+        # Zero-init Gate
         nn.init.constant_(self.gate_mlp[2].weight, 0)
         nn.init.constant_(self.gate_mlp[2].bias, 0)
 
     def forward(self, x, prev_result, global_index_t, confidence_score):
-        """
-        Args:
-            x (torch.Tensor): The *entire* token sequence [B, N_t + N_s, C]
-            prev_result (torch.Tensor): The RoIAlign'd features from t-1, R_{t-1} [B, K*K, C]
-            global_index_t (torch.Tensor): Indices of template tokens [B, N_t]
-            confidence_score (torch.Tensor): External confidence score from t-1 [B]
-        """
-        
-        # 1. Split tokens
+        # x: [B, N, C]
         lens_z_current = global_index_t.shape[1]
-        t_tokens = x[:, :lens_z_current]  # Current Template Tokens [B, N_t, C]
-        s_tokens = x[:, lens_z_current:]  # Current Search Tokens [B, N_s, C]
-        
-        # 2. Feature Enhancement (Cross-Attention)
-        # Query = t_tokens, Key/Value = prev_result (R_{t-1})
+        t_tokens = x[:, :lens_z_current]
+        s_tokens = x[:, lens_z_current:]
+
+        # --- Branch 1: 时序增强特征提取 ---
+        # 1. Cross Attention
         q = self.norm_q(t_tokens)
         kv = self.norm_kv(prev_result)
-        attn_output, _ = self.cross_attn(query=q, key=kv, value=kv)
+        attn_out, _ = self.cross_attn(query=q, key=kv, value=kv)
         
-        # delta_t is the "enhancement vector"
-        delta_t = self.drop_path(attn_output)
-
-        # 3. Confidence Assessment & Gating
-        # 3a. Internal Confidence: Gate learns "how useful" delta_t is
-        alpha_internal = self.gate_mlp(delta_t)
+        # 2. 独立的 FFN 处理增强特征 (Post-Attn Processing)
+        # 这一步让特征在融合前完成非线性变换
+        feat_enhance = attn_out + self.drop_path(self.enhance_ffn(self.norm_enhance(attn_out)))
         
-        # 3b. External Confidence: Reshape [B] -> [B, 1, 1] for broadcasting
+        # --- Branch 2: 计算 Gate ---
+        alpha_internal = self.gate_mlp(feat_enhance) # 根据处理好的特征计算置信度
         alpha_external = confidence_score.unsqueeze(-1).unsqueeze(-1)
-        
-        # 3c. Combined Gate:
         effective_gate = alpha_internal * alpha_external
-        
-        # 3d. Apply Gated Update:
-        # t_tokens + (effective_gate * delta_t)
-        t_gated = t_tokens.addcmul(effective_gate, delta_t)
 
-        # 4. Standard FFN block
-        t_final = t_gated + self.drop_path(self.ffn(self.norm2(t_gated)))
-        
-        # 5. Recombine tokens and return
-        return torch.cat([t_final, s_tokens], dim=1)
+        # --- Fusion: Post-Process Fusion ---
+        # 将增强特征融合回原始的主干 token
+        t_enhanced = t_tokens + effective_gate * feat_enhance
+
+        # 如果这个模块仅仅是做增强（不替代原本的 Block），到这里就结束了
+        # 返回融合后的 t 和原始的 s
+        return torch.cat([t_enhanced, s_tokens], dim=1)
 ### --- END NEW --- ###
 
 ### --- NEW: Positional Encoding Generator (CPE) --- ###
