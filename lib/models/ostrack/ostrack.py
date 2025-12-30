@@ -56,6 +56,18 @@ class OSTrack(nn.Module):
         self.roi_jitter_scale = roi_jitter_scale
         ### --- END NEW --- ###
 
+        ### --- NEW: Content-Aware PE Eraser --- ###
+        embed_dim = self.backbone.embed_dim
+
+        self.pe_eraser = nn.Sequential(
+            nn.Linear(embed_dim * 2, embed_dim), # feature map & initial pe
+            nn.ReLU(inplace=True),
+            nn.Linear(embed_dim, embed_dim)
+        )
+
+        nn.init.constant_(self.pe_eraser[-1].weight, 0)
+        nn.init.constant_(self.pe_eraser[-1].bias, 0)
+
     def forward(self, template: torch.Tensor,
                 search: torch.Tensor,
                 gt_bboxes: torch.Tensor = None, ### NEW: GT BBoxes for Teacher Forcing
