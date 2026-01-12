@@ -185,6 +185,7 @@ class OSTrack(nn.Module):
         out.update(aux_dict)
         out['backbone_feat'] = x
         out['next_temporal_data'] = next_temporal_data ### NEW: Return the state for t+1
+        out['observation_data'] = aux_dict.get("observation_data", None) ### NEW: Return observation data
         return out
 
     def forward_head(self, cat_feature, gt_score_map=None):
