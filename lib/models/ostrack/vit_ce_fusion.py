@@ -44,6 +44,8 @@ class TemporalEnhancer(nn.Module):
         
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
+        self.trace_data = {}
+
         self._init_weights()
 
     def _init_weights(self):
@@ -80,6 +82,12 @@ class TemporalEnhancer(nn.Module):
         alpha_internal = self.gate_mlp(feat_enhance) # 根据处理好的特征计算置信度
         alpha_external = confidence_score.unsqueeze(-1).unsqueeze(-1)
         effective_gate = alpha_internal * alpha_external
+
+        if not self.training:
+            # 记录一些中间数据，便于分析
+            self.trace_data['alpha_internal_mean'] = alpha_internal.mean(dim=(1,2)).detach().cpu().numpy()
+            self.trace_data['alpha_external'] = alpha_external.detach().cpu().numpy()
+            self.trace_data['effective_gate_mean'] = effective_gate.mean(dim=(1,2)).detach().cpu().numpy()
 
         # --- Fusion: Post-Process Fusion ---
         # 将增强特征融合回原始的主干 token
@@ -381,7 +389,8 @@ class VisionTransformerCEF(VisionTransformer):
         aux_dict = {
             "attn": attn,
             "removed_indexes_s": removed_indexes_s,  # used for visualization
-            "feature_to_store": feature_to_store      ### --- NEW --- ###
+            "feature_to_store": feature_to_store,      ### --- NEW --- ###
+            "observation_data": self.temporal_enhancers[str(self.temporal_enhance_loc[-1])].trace_data if self.temporal_enhance_loc is not None else None ### --- NEW --- ###
         }
 
         return x, aux_dict
