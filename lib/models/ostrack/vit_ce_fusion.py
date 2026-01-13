@@ -86,13 +86,13 @@ class TemporalEnhancer(nn.Module):
         if not self.training:
             # 记录一些中间数据，便于分析
             # alpha_internal 是 [B, N, C]，取均值变成标量
-            trace_dict['alpha_internal_mean'] = alpha_internal.mean().item()
+            self.trace_data['alpha_internal_mean'] = alpha_internal.mean().item()
             
             # alpha_external 是 [B, 1, 1]，取均值（或直接取值）变成标量
-            trace_dict['alpha_external'] = alpha_external.mean().item()
+            self.trace_data['alpha_external'] = alpha_external.mean().item()
             
             # effective_gate 是 [B, N, C]，取均值变成标量
-            trace_dict['effective_gate_mean'] = effective_gate.mean().item()
+            self.trace_data['effective_gate_mean'] = effective_gate.mean().item()
 
         # --- Fusion: Post-Process Fusion ---
         # 将增强特征融合回原始的主干 token
