@@ -263,12 +263,18 @@ class VisionTransformerCEF(VisionTransformer):
         z += self.pos_embed_z
         x += self.pos_embed_x
 
+        C_embed = x.shape[-1]
+        H_x, W_x = x.shape[1]**.5, x.shape[1]**.5
+        H_z, W_z = z.shape[1]**.5, z.shape[1]**.5
+        H_x, W_x = int(H_x), int(W_x)
+        H_z, W_z = int(H_z), int(W_z)
+        pos_embed_x_2d = self.pos_embed_x.transpose(1, 2).reshape(1, C_embed, H_x, W_x)
+        self.pos_embed_x_2d = pos_embed_x_2d.expand(B, -1, -1, -1).contiguous()
+
         ### --- NEW: Apply PEG (CPE) --- ###
         # 1. 计算 Feature Map 的尺寸
         # x shape: [B, N_x, C], z shape: [B, N_z, C]
         # H_feat = H_img // patch_size
-        H_x, W_x = x.shape[1]**.5, x.shape[1]**.5
-        H_z, W_z = z.shape[1]**.5, z.shape[1]**.5
         
         # 转换为 int
         H_x, W_x = int(H_x), int(W_x)

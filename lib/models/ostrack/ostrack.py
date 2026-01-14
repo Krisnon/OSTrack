@@ -170,15 +170,46 @@ class OSTrack(nn.Module):
                 spatial_scale = 1.0 / self.backbone_stride,
                 aligned=True
             )
+
+            # PE_roi is the positional embeddings for the RoI region
+            PE_roi = roi_align(
+                self.backbone.pos_embed_x_2d,
+                boxes_for_roi,
+                output_size=(self.temporal_roi_size, self.temporal_roi_size),
+                spatial_scale = 1.0 / self.backbone_stride,
+                aligned=True
+            )
+
+            R_t_tokens = R_t.flatten(2).transpose(1, 2)  # [B, K*K, C]
+            PE_roi_tokens = PE_roi.flatten(2).transpose(1, 2)  # [B, K*K, C]
+
+            # Apply PE Eraser
+            R_t_erased = self.pe_eraser(torch.cat([R_t_tokens, PE_roi_tokens], dim=-1))
+
+            # Apply Template PE
+            PE_template_size = int(self.backbone.pos_embed_z.shape[1] ** 0.5)
             
+            if(PE_template_size != self.temporal_roi_size):
+                C = self.backbone.pos_embed_z.shape[-1]
+                PE_template_2d = self.backbone.pos_embed_z.transpose(1, 2).reshape(1, C, PE_template_size, PE_template_size)
+                PE_template_resized = nn.functional.interpolate(
+                    PE_template_2d,
+                    size=(self.temporal_roi_size, self.temporal_roi_size),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                PE_template = PE_template_resized.flatten(2).transpose(1, 2)  # [1, K*K, C]
+            else:
+                PE_template = self.backbone.pos_embed_z  # [1, K*K, C]
+
+            final_temporal_tokens = R_t_erased + PE_template
+
             # 6. Package the state for the next time step
             next_temporal_data = {
-                'features': R_t.detach(),      # [B, C, K, K]
+                'features': final_temporal_tokens.detach(),      # [B, C, K, K]
                 'confidence': confidence,      # [B]
                 'reliability': reliability     # [B]
             }
-            # Reshape R_t to [B, K*K, C] for the Cross-Attention module
-            next_temporal_data['features'] = R_t.flatten(2).transpose(1, 2).detach()
 
         ### --- END NEW --- ###
 
