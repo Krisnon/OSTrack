@@ -347,6 +347,8 @@ def build_ostrack(cfg, training=True):
             param.requires_grad = True
         elif 'backbone.norm' in name:
             param.requires_grad = True
+        elif 'pe_eraser' in name:
+            param.requires_grad = True
         else:
             param.requires_grad = False
 
