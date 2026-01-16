@@ -345,7 +345,7 @@ def build_ostrack(cfg, training=True):
     for name, param in model.named_parameters():
         if 'temporal_enhancers' in name:
             param.requires_grad = True
-        elif 'backbone.norm' in name:
+        elif 'box_head' in name:
             param.requires_grad = True
         elif 'pe_eraser' in name:
             param.requires_grad = True
