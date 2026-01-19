@@ -60,7 +60,7 @@ class TemporalEnhancer(nn.Module):
 
         # Zero-init Gate
         nn.init.constant_(self.gate_mlp[2].weight, 0)
-        nn.init.constant_(self.gate_mlp[2].bias, -5)
+        nn.init.constant_(self.gate_mlp[2].bias, 0)
 
     def forward(self, x, prev_result, global_index_t, confidence_score):
         # x: [B, N, C]
