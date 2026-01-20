@@ -50,8 +50,8 @@ class TemporalEnhancer(nn.Module):
 
     def _init_weights(self):
         # Zero-init Cross-Attention
-        nn.init.constant_(self.cross_attn.out_proj.weight, 0)
-        nn.init.constant_(self.cross_attn.out_proj.bias, 0)
+        # nn.init.constant_(self.cross_attn.out_proj.weight, 0)
+        # nn.init.constant_(self.cross_attn.out_proj.bias, 0)
         
         # Zero-init Enhance FFN
         if hasattr(self.enhance_ffn, 'fc2'):
@@ -60,7 +60,7 @@ class TemporalEnhancer(nn.Module):
 
         # Zero-init Gate
         nn.init.constant_(self.gate_mlp[2].weight, 0)
-        nn.init.constant_(self.gate_mlp[2].bias, 0)
+        nn.init.constant_(self.gate_mlp[2].bias, -5)
 
     def forward(self, x, prev_result, global_index_t, confidence_score):
         # x: [B, N, C]
