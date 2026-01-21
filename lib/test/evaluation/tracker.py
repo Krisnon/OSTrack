@@ -107,6 +107,9 @@ class Tracker:
             output['all_boxes'] = []
             output['all_scores'] = []
 
+        if tracker.params.save_TE_matrix:
+            output['observation_data'] = []
+
         def _store_outputs(tracker_out: dict, defaults=None):
             defaults = {} if defaults is None else defaults
             for key in output.keys():

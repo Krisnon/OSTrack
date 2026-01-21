@@ -603,3 +603,523 @@ def print_results_per_video(trackers, dataset, report_name, merge_results=False,
             tracker_disp_names = [get_tracker_display_name(trk) for trk in tracker_names]
             report_text = generate_formatted_report(tracker_disp_names, scores, table_name=report_name)
             print(report_text)
+
+def plot_draw_save_per_seq(y, x, scores, trackers, plot_draw_styles, result_plot_path, seq_name):
+    """
+    专门为单视频设计的绘图函数，文件名以视频名为准
+    """
+    # 保持和原代码一致的样式设置
+    plt.rcParams['text.usetex'] = True
+    plt.rcParams["font.family"] = "Times New Roman"
+    font_size = 20
+    
+    # 定义绘图参数
+    plot_opts = {
+        'font_size': 20, 'font_size_axis': 20, 'line_width': 2, 'font_size_legend': 20,
+        'legend_loc': 'lower left',
+        'xlabel': 'Overlap threshold', 'ylabel': 'Overlap Precision [\%]', 
+        'xlim': (0, 1.0), 'ylim': (0, 100)
+    }
+
+    matplotlib.rcParams.update({'font.size': plot_opts['font_size']})
+    matplotlib.rcParams.update({'axes.titlesize': plot_opts['font_size_axis']})
+    matplotlib.rcParams.update({'axes.labelsize': plot_opts['font_size_axis']})
+
+    fig, ax = plt.subplots()
+
+    # 排序：按当前视频的 AUC 排序
+    index_sort = scores.argsort(descending=False)
+
+    plotted_lines = []
+    legend_text = []
+
+    for id, id_sort in enumerate(index_sort):
+        # 获取样式（保持跟总图一致的颜色分配）
+        style_idx = index_sort.numel() - id - 1
+        color = plot_draw_styles[style_idx]['color']
+        line_style = plot_draw_styles[style_idx]['line_style']
+
+        line = ax.plot(x.tolist(), y[id_sort, :].tolist(),
+                       linewidth=plot_opts['line_width'],
+                       color=color,
+                       linestyle=line_style)
+
+        plotted_lines.append(line[0])
+
+        tracker = trackers[id_sort]
+        disp_name = get_tracker_display_name(tracker)
+
+        legend_text.append('{} [{:.1f}]'.format(disp_name, scores[id_sort]))
+
+    # 图例加粗第一名
+    try:
+        legend_text[-1] = r'\textbf{%s}'%(legend_text[-1])
+        ax.legend(plotted_lines[::-1], legend_text[::-1], loc=plot_opts['legend_loc'], 
+                  fancybox=False, edgecolor='black',
+                  fontsize=plot_opts['font_size_legend'], framealpha=1.0)
+    except:
+        pass
+
+    # 设置标题为视频名称
+    ax.set(xlabel=plot_opts['xlabel'],
+           ylabel=plot_opts['ylabel'],
+           xlim=plot_opts['xlim'], ylim=plot_opts['ylim'],
+           title=r"\textbf{%s}" % (seq_name.replace('_', '\_'))) # 转义下划线防止Latex报错
+
+    ax.grid(True, linestyle='-.')
+    fig.tight_layout()
+
+    # --- 保存文件 ---
+    # 文件名直接用视频名
+    save_path = os.path.join(result_plot_path, '{}.pdf'.format(seq_name))
+    fig.savefig(save_path, dpi=300, format='pdf', transparent=True)
+    
+    # 释放内存，防止循环画几百张图导致内存爆炸
+    plt.close(fig) 
+
+
+def plot_success_per_sequence(trackers, dataset, report_name, force_evaluation=False, **kwargs):
+    """
+    主函数：遍历数据集中的每个视频，生成单独的 Success Plot
+    """
+    settings = env_settings()
+    plot_draw_styles = get_plot_draw_styles()
+
+    # 1. 加载所有数据
+    # 这里我们利用已有的逻辑，它会计算好所有的结果并缓存在 eval_data.pkl 中
+    eval_data = check_and_load_precomputed_results(trackers, dataset, report_name, force_evaluation, **kwargs)
+    
+    # 2. 准备保存目录
+    # 在原本的 report 目录下新建一个 per_sequence_plots 文件夹
+    base_plot_path = os.path.join(settings.result_plot_path, report_name)
+    per_seq_save_path = os.path.join(base_plot_path, 'per_sequence_plots')
+    
+    if not os.path.exists(per_seq_save_path):
+        os.makedirs(per_seq_save_path)
+        print(f"Created directory: {per_seq_save_path}")
+
+    # 3. 获取核心数据张量
+    # 形状: [Num_Sequences, Num_Trackers, 101]
+    ave_success_rate_plot_overlap = torch.tensor(eval_data['ave_success_rate_plot_overlap'])
+    threshold_set_overlap = torch.tensor(eval_data['threshold_set_overlap'])
+    
+    tracker_names = eval_data['trackers']
+    sequences = eval_data['sequences'] # 视频名称列表
+    
+    print(f"Start generating plots for {len(sequences)} sequences...")
+
+    # 4. 遍历每个视频进行绘图
+    for i, seq_name in enumerate(sequences):
+        # 取出第 i 个视频的数据
+        # shape: [Num_Trackers, 101]
+        seq_data = ave_success_rate_plot_overlap[i, :, :]
+        
+        # 计算该视频下的 AUC (Mean over threshold axis)
+        # shape: [Num_Trackers]
+        seq_auc = seq_data.mean(1) * 100.0
+        
+        # 数据转换 (0-1 -> 0-100 for y-axis)
+        seq_data_plot = seq_data * 100.0
+        
+        # 绘图并保存
+        plot_draw_save_per_seq(seq_data_plot, threshold_set_overlap, seq_auc, 
+                               tracker_names, plot_draw_styles, per_seq_save_path, seq_name)
+        
+        if (i + 1) % 10 == 0:
+            print(f"Processed {i + 1}/{len(sequences)}: {seq_name}")
+
+    print(f"\nAll per-sequence plots saved to: {per_seq_save_path}")
+
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import torch
+from lib.test.evaluation.environment import env_settings
+
+def compute_iou_for_sequence(gt_boxes, pred_boxes):
+    """
+    输入:
+        gt_boxes: [N, 4] numpy array
+        pred_boxes: [N, 4] numpy array
+    输出:
+        iou: [N] numpy array
+    """
+    # 确保长度对齐
+    min_len = min(len(gt_boxes), len(pred_boxes))
+    gt_boxes = gt_boxes[:min_len]
+    pred_boxes = pred_boxes[:min_len]
+
+    # 批量计算交集
+    x1 = np.maximum(gt_boxes[:, 0], pred_boxes[:, 0])
+    y1 = np.maximum(gt_boxes[:, 1], pred_boxes[:, 1])
+    x2 = np.minimum(gt_boxes[:, 0] + gt_boxes[:, 2], pred_boxes[:, 0] + pred_boxes[:, 2])
+    y2 = np.minimum(gt_boxes[:, 1] + gt_boxes[:, 3], pred_boxes[:, 1] + pred_boxes[:, 3])
+
+    inter_w = np.maximum(0, x2 - x1)
+    inter_h = np.maximum(0, y2 - y1)
+    inter_area = inter_w * inter_h
+
+    # 计算并集
+    gt_area = gt_boxes[:, 2] * gt_boxes[:, 3]
+    pred_area = pred_boxes[:, 2] * pred_boxes[:, 3]
+    union_area = gt_area + pred_area - inter_area
+
+    # 计算 IoU，处理除零异常
+    iou = np.zeros(min_len)
+    mask = union_area > 0
+    iou[mask] = inter_area[mask] / union_area[mask]
+
+    return iou
+
+
+def plot_iou_curve_per_video(trackers, dataset, report_name):
+    """
+    为数据集中的每个视频生成：帧号 vs. IoU 的曲线图
+    (修正版：解决了 Tracker 对象属性访问报错的问题)
+    """
+    settings = env_settings()
+    plot_draw_styles = get_plot_draw_styles() 
+
+    # 1. 创建保存目录
+    base_plot_path = os.path.join(settings.result_plot_path, report_name)
+    iou_plot_path = os.path.join(base_plot_path, 'per_sequence_iou_plots')
+    
+    if not os.path.exists(iou_plot_path):
+        os.makedirs(iou_plot_path)
+        print(f"Created directory: {iou_plot_path}")
+
+    print(f"Start plotting IoU curves for {len(dataset)} sequences...")
+
+    # 全局绘图设置
+    plt.rcParams['text.usetex'] = True
+    plt.rcParams["font.family"] = "Times New Roman"
+    font_size = 18
+
+    for seq_id, seq in enumerate(dataset):
+        seq_name = seq.name
+        gt_boxes = np.array(seq.ground_truth_rect)
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        has_valid_plot = False
+
+        for trk_id, tracker in enumerate(trackers):
+            # --- 路径构建 ---
+            if tracker.run_id is not None:
+                res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, 
+                                        '{:03d}'.format(tracker.run_id), seq_name + '.txt')
+            else:
+                res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, 
+                                        seq_name + '.txt')
+            
+            # 容错：如果找不到，尝试不带 run_id 的路径
+            if not os.path.exists(res_file):
+                 res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, 
+                                        seq_name + '.txt')
+
+            if os.path.exists(res_file):
+                try:
+                    # --- 读取预测结果 ---
+                    try:
+                        pred_boxes = np.loadtxt(res_file, delimiter=',')
+                    except:
+                        pred_boxes = np.loadtxt(res_file)
+                    
+                    if pred_boxes.ndim == 1: 
+                        pred_boxes = pred_boxes[None, :]
+
+                    # --- 计算 IoU ---
+                    iou_series = compute_iou_for_sequence(gt_boxes, pred_boxes)
+                    
+                    # --- 获取显示名称 (修正点：手动构建名称，不调用 get_tracker_display_name) ---
+                    # 检查 tracker 是否有 display_name 属性
+                    d_name = getattr(tracker, 'display_name', None)
+                    if d_name is not None:
+                        disp_name = d_name
+                    else:
+                        # 手动拼接 name_param_runid
+                        run_id_str = f"_{tracker.run_id:03d}" if tracker.run_id is not None else ""
+                        disp_name = f"{tracker.name}_{tracker.parameter_name}{run_id_str}"
+
+                    # --- 绘图 ---
+                    style = plot_draw_styles[trk_id % len(plot_draw_styles)]
+                    
+                    ax.plot(range(len(iou_series)), iou_series, 
+                            color=style['color'], 
+                            linestyle=style['line_style'],
+                            linewidth=1.5,
+                            label=f"{disp_name} ({iou_series.mean():.2f})") # 图例只保留两位小数
+                    
+                    has_valid_plot = True
+                except Exception as e:
+                    print(f"Error processing {seq_name} for {tracker.name}: {e}")
+            else:
+                pass # 没找到结果文件就跳过
+
+        if has_valid_plot:
+            ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Threshold 0.5')
+            
+            # 标题转义下划线，防止 LaTeX 报错
+            safe_title = seq_name.replace('_', '\_')
+            ax.set_title(r"\textbf{%s}" % safe_title, fontsize=font_size)
+            
+            ax.set_xlabel('Frame Number', fontsize=font_size)
+            ax.set_ylabel('IoU Score', fontsize=font_size)
+            ax.set_ylim(-0.05, 1.05)
+            ax.set_xlim(0, len(gt_boxes))
+            
+            ax.legend(loc='lower left', fancybox=False, edgecolor='black', framealpha=0.8, fontsize=12)
+            ax.grid(True, linestyle='-.', alpha=0.5)
+            
+            save_path = os.path.join(iou_plot_path, f'{seq_name}.pdf')
+            plt.tight_layout()
+            fig.savefig(save_path, dpi=300, format='pdf')
+        
+        plt.close(fig)
+
+        if (seq_id + 1) % 10 == 0:
+            print(f"Processed {seq_id + 1}/{len(dataset)} sequences.")
+
+    print(f"\nDone! IoU plots saved to: {iou_plot_path}")
+
+import cv2
+import os
+import numpy as np
+from lib.test.evaluation.environment import env_settings
+
+def visualize_sequence(tracker, dataset, seq_name, save_video=True, show_gt=True):
+    """
+    可视化指定序列的跟踪结果
+    Args:
+        tracker: 跟踪器对象
+        dataset: 数据集对象
+        seq_name: 目标序列名称 (字符串, 如 'Basketball')
+        save_video: True则保存为mp4视频, False则保存为每一帧的图片
+        show_gt: 是否画出 Ground Truth (绿色)
+    """
+    settings = env_settings()
+    
+    # 1. 找到对应的序列对象
+    target_seq = None
+    for seq in dataset:
+        if seq.name == seq_name:
+            target_seq = seq
+            break
+    
+    if target_seq is None:
+        print(f"Error: Sequence '{seq_name}' not found in dataset.")
+        return
+
+    # 2. 读取预测结果 (Pred)
+    # 构建路径 (适配 run_id)
+    if tracker.run_id is not None:
+        res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, 
+                                '{:03d}'.format(tracker.run_id), seq_name + '.txt')
+    else:
+        res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, 
+                                seq_name + '.txt')
+
+    if not os.path.exists(res_file):
+        # 再次尝试无 run_id 的路径
+        res_file = os.path.join(settings.results_path, tracker.name, tracker.parameter_name, seq_name + '.txt')
+        if not os.path.exists(res_file):
+            print(f"Error: Result file not found: {res_file}")
+            return
+
+    # 加载结果
+    try:
+        pred_boxes = np.loadtxt(res_file, delimiter=',')
+    except:
+        pred_boxes = np.loadtxt(res_file)
+    
+    if pred_boxes.ndim == 1:
+        pred_boxes = pred_boxes[None, :]
+
+    # 3. 获取 Ground Truth (GT)
+    gt_boxes = np.array(target_seq.ground_truth_rect)
+
+    # 4. 准备输出目录
+    # 保存到 results_plot/viz/seq_name/ 下
+    base_save_path = os.path.join(settings.result_plot_path, 'visualization', seq_name)
+    if not os.path.exists(base_save_path):
+        os.makedirs(base_save_path)
+    
+    print(f"Visualizing sequence: {seq_name}...")
+    print(f"Saving output to: {base_save_path}")
+
+    # 5. 视频写入器初始化 (如果需要保存视频)
+    video_writer = None
+    if save_video:
+        # 读取第一帧获取图像尺寸
+        first_img = cv2.imread(target_seq.frames[0])
+        h, w, _ = first_img.shape
+        video_path = os.path.join(base_save_path, f'{seq_name}_{tracker.name}.mp4')
+        # mp4v 是比较通用的编码
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+        video_writer = cv2.VideoWriter(video_path, fourcc, 30, (w, h))
+
+    # 6. 逐帧处理
+    # 长度以 seq.frames 为准
+    num_frames = len(target_seq.frames)
+    
+    for i in range(num_frames):
+        frame_path = target_seq.frames[i]
+        img = cv2.imread(frame_path)
+        
+        if img is None:
+            print(f"Warning: Could not read frame {frame_path}")
+            continue
+
+        # --- 画 GT (绿色) ---
+        if show_gt and i < len(gt_boxes):
+            gt = gt_boxes[i]
+            # 只有当 GT 均非 0 且非 NaN 时才画
+            if not np.any(np.isnan(gt)) and np.any(gt > 0):
+                x, y, w, h = map(int, gt)
+                cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(img, 'GT', (x, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        # --- 画 Pred (红色) ---
+        if i < len(pred_boxes):
+            pred = pred_boxes[i]
+            # 同样检查有效性
+            if not np.any(np.isnan(pred)):
+                x, y, w, h = map(int, pred)
+                cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                
+                # 计算并显示当前帧 IoU
+                iou_str = ""
+                if i < len(gt_boxes):
+                    cur_iou = compute_iou_single(gt_boxes[i], pred)
+                    iou_str = f" IoU: {cur_iou:.2f}"
+                
+                label = f"{tracker.name}{iou_str}"
+                cv2.putText(img, label, (x, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+        # --- 显示帧号 ---
+        cv2.putText(img, f"Frame: {i}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+        # --- 保存 ---
+        if save_video:
+            video_writer.write(img)
+        else:
+            # 保存为图片
+            img_save_path = os.path.join(base_save_path, f'{i:04d}.jpg')
+            cv2.imwrite(img_save_path, img)
+            
+        if (i+1) % 50 == 0:
+            print(f"Processed {i+1}/{num_frames} frames")
+
+    # 释放资源
+    if video_writer is not None:
+        video_writer.release()
+        print(f"Video saved: {video_path}")
+    else:
+        print(f"Images saved in: {base_save_path}")
+
+def compute_iou_single(box1, box2):
+    """辅助函数：计算单帧 IoU"""
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+    
+    xi1 = max(x1, x2)
+    yi1 = max(y1, y2)
+    xi2 = min(x1 + w1, x2 + w2)
+    yi2 = min(y1 + h1, y2 + h2)
+    
+    inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+    box1_area = w1 * h1
+    box2_area = w2 * h2
+    union_area = box1_area + box2_area - inter_area
+    
+    if union_area <= 0: return 0
+    return inter_area / union_area
+
+
+def print_attribute_results(trackers, dataset, report_name, merge_results=False, **kwargs):
+    """
+    Print the results broken down by sequence attributes (e.g., IV, SV, OCC, etc.)
+    Usually used for LaSOT, OTB, UAV123 datasets.
+
+    args:
+        trackers - List of trackers to evaluate
+        dataset - List of sequences to evaluate (must contain 'attributes' property)
+        report_name - Name of the folder where results are saved
+        merge_results - If True, multiple random runs are averaged
+    """
+    # 1. Load pre-computed results
+    eval_data = check_and_load_precomputed_results(trackers, dataset, report_name, **kwargs)
+
+    # Merge results from multiple runs if needed
+    if merge_results:
+        eval_data = merge_multiple_runs(eval_data)
+
+    tracker_names = eval_data['trackers']
+    # Data shape: [Num_Sequences, Num_Trackers, 101]
+    ave_success_rate_plot_overlap = torch.tensor(eval_data['ave_success_rate_plot_overlap'])
+    
+    # Map sequence names to their index in the eval_data
+    # We need this because dataset list order might conceptually differ or we need fast lookup
+    seq_name_to_idx = {name: i for i, name in enumerate(eval_data['sequences'])}
+    
+    # 2. Group sequences by attributes
+    # Structure: {'IV': [idx1, idx2...], 'SV': [idx3, idx4...]}
+    attr_indices = {}
+    
+    # Standard LaSOT attributes for sorting order (optional, makes table look standard)
+    lasot_order = ['IV', 'SV', 'OCC', 'DEF', 'MB', 'FM', 'IPR', 'OPR', 'OV', 'BC', 'LR', 'VC', 'CM', 'ROT', 'POC']
+    
+    print("Aggregating results by attributes...")
+    
+    for seq in dataset:
+        if seq.name in seq_name_to_idx:
+            idx = seq_name_to_idx[seq.name]
+            
+            # Check if sequence has attributes
+            if not hasattr(seq, 'attributes'):
+                continue
+                
+            attrs = seq.attributes
+            # Handle case where attributes might be a single string or empty
+            if not attrs: 
+                continue
+            
+            for attr in attrs:
+                if attr not in attr_indices:
+                    attr_indices[attr] = []
+                attr_indices[attr].append(idx)
+
+    # 3. Compute AUC for each attribute
+    scores = {}
+    
+    # Sort attributes: specific order first, then others alphabetically
+    sorted_attrs = sorted(attr_indices.keys(), key=lambda x: (lasot_order.index(x) if x in lasot_order else 999, x))
+
+    for attr in sorted_attrs:
+        indices = torch.tensor(attr_indices[attr], dtype=torch.long)
+        
+        if len(indices) == 0:
+            continue
+            
+        # Select data for this attribute: [Num_Attr_Seqs, Num_Trackers, 101]
+        attr_data = ave_success_rate_plot_overlap[indices, :, :]
+        
+        # Calculate AUC: Mean over sequences (dim 0) -> Mean over thresholds (dim 1)
+        # Result shape: [Num_Trackers]
+        attr_auc = attr_data.mean(0).mean(1) * 100.0
+        
+        # Add sequence count to column name for clarity, e.g., "IV (15)"
+        col_name = "{} ({})".format(attr, len(indices))
+        scores[col_name] = attr_auc
+
+    # 4. Print Table
+    if not scores:
+        print("No attributes found in the dataset sequences.")
+        return
+
+    tracker_disp_names = [get_tracker_display_name(trk) for trk in tracker_names]
+    
+    print('\nAttribute-based Performance (AUC):')
+    # Use the existing report generator
+    # Note: If there are too many attributes, the table might wrap in the console.
+    report_text = generate_formatted_report(tracker_disp_names, scores, table_name='Attributes')
+    print(report_text)
