@@ -46,13 +46,11 @@ class OSTrack(BaseTracker):
         # for save boxes from all queries
         self.save_all_boxes = params.save_all_boxes
         self.z_dict1 = {}
-        
-        self.temporal_data_state = None  # <<< NEW: Initialize temporal state
 
     def initialize(self, image, info: dict):
         # forward the template once
         z_patch_arr, resize_factor, z_amask_arr = sample_target(image, info['init_bbox'], self.params.template_factor,
-                                                               output_sz=self.params.template_size)
+                                                    output_sz=self.params.template_size)
         self.z_patch_arr = z_patch_arr
         template = self.preprocessor.process(z_patch_arr, z_amask_arr)
         with torch.no_grad():
@@ -67,9 +65,6 @@ class OSTrack(BaseTracker):
         # save states
         self.state = info['init_bbox']
         self.frame_id = 0
-        
-        self.temporal_data_state = None  # <<< NEW: Reset temporal state for each new sequence
-        
         if self.save_all_boxes:
             '''save all predicted boxes'''
             all_boxes_save = info['init_bbox'] * self.cfg.MODEL.NUM_OBJECT_QUERIES
@@ -79,7 +74,7 @@ class OSTrack(BaseTracker):
         H, W, _ = image.shape
         self.frame_id += 1
         x_patch_arr, resize_factor, x_amask_arr = sample_target(image, self.state, self.params.search_factor,
-                                                               output_sz=self.params.search_size)  # (x1, y1, w, h)
+                                                                output_sz=self.params.search_size)  # (x1, y1, w, h)
         search = self.preprocessor.process(x_patch_arr, x_amask_arr)
 
         with torch.no_grad():
@@ -87,15 +82,7 @@ class OSTrack(BaseTracker):
             # merge the template and the search
             # run the transformer
             out_dict = self.network.forward(
-                template=self.z_dict1.tensors, 
-                search=x_dict.tensors, 
-                ce_template_mask=self.box_mask_z,
-                temporal_data=self.temporal_data_state  # <<< MODIFIED: Pass the state
-            )
-            
-            # <<< --- NEW: Update the temporal state for the next frame ---
-            self.temporal_data_state = out_dict['next_temporal_data']
-            # <<< --- END NEW ---
+                template=self.z_dict1.tensors, search=x_dict.tensors, ce_template_mask=self.box_mask_z)
 
         # add hann windows
         pred_score_map = out_dict['score_map']

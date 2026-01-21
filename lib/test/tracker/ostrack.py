@@ -45,7 +45,10 @@ class OSTrack(BaseTracker):
                 self._init_visdom(None, 1)
         # for save boxes from all queries
         self.save_all_boxes = params.save_all_boxes
+        self.save_TE_matrix = params.save_TE_matrix
         self.z_dict1 = {}
+        
+        self.temporal_data_state = None  # <<< NEW: Initialize temporal state
 
     def initialize(self, image, info: dict):
         # forward the template once
@@ -65,6 +68,9 @@ class OSTrack(BaseTracker):
         # save states
         self.state = info['init_bbox']
         self.frame_id = 0
+        
+        self.temporal_data_state = None  # <<< NEW: Reset temporal state for each new sequence
+        
         if self.save_all_boxes:
             '''save all predicted boxes'''
             all_boxes_save = info['init_bbox'] * self.cfg.MODEL.NUM_OBJECT_QUERIES
@@ -82,7 +88,16 @@ class OSTrack(BaseTracker):
             # merge the template and the search
             # run the transformer
             out_dict = self.network.forward(
-                template=self.z_dict1.tensors, search=x_dict.tensors, ce_template_mask=self.box_mask_z)
+                template=self.z_dict1.tensors, 
+                search=x_dict.tensors, 
+                ce_template_mask=self.box_mask_z,
+                temporal_data=self.temporal_data_state  # <<< MODIFIED: Pass the state
+            )
+            
+            # <<< --- NEW: Update the temporal state for the next frame ---
+            self.temporal_data_state = out_dict['next_temporal_data']
+            # self.temporal_data_state = None
+            # <<< --- END NEW ---
 
         # add hann windows
         pred_score_map = out_dict['score_map']
@@ -128,6 +143,12 @@ class OSTrack(BaseTracker):
             all_boxes_save = all_boxes.view(-1).tolist()  # (4N, )
             return {"target_bbox": self.state,
                     "all_boxes": all_boxes_save}
+        if self.save_TE_matrix:
+            observation_data = out_dict['observation_data'].copy()
+            return {
+                "target_bbox": self.state,
+                "observation_data": observation_data
+            }
         else:
             return {"target_bbox": self.state}
 

@@ -90,6 +90,19 @@ def _save_tracker_output(seq: Sequence, tracker: Tracker, output: dict):
                 bbox_file = '{}_all_scores.txt'.format(base_results_path)
                 save_score(bbox_file, data)
 
+        if key == 'observation_data':
+            if isinstance(data[0], (dict, OrderedDict)):
+                data_dict = _convert_dict(data)
+
+                for obj_id, d in data_dict.items():
+                    bbox_file = '{}_{}_observation.txt'.format(base_results_path, obj_id)
+                    save_score(bbox_file, d)
+            else:
+                # Single-object mode
+                print("saving observation data...")
+                bbox_file = '{}_observation.txt'.format(base_results_path)
+                save_score(bbox_file, data)
+
         elif key == 'time':
             if isinstance(data[0], dict):
                 data_dict = _convert_dict(data)
