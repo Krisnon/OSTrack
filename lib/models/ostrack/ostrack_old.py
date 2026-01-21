@@ -145,7 +145,7 @@ def build_ostrack(cfg, training=True):
     )
 
     if 'OSTrack' in cfg.MODEL.PRETRAIN_FILE and training:
-        checkpoint = torch.load(cfg.MODEL.PRETRAIN_FILE, map_location="cpu")
+        checkpoint = torch.load(cfg.MODEL.PRETRAIN_FILE, map_location="cpu", weights_only=False)
         missing_keys, unexpected_keys = model.load_state_dict(checkpoint["net"], strict=False)
         print('Load pretrained model from: ' + cfg.MODEL.PRETRAIN_FILE)
 

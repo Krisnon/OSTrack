@@ -11,7 +11,7 @@ def inspect_structure(file_path):
         
     try:
         # map_location='cpu' 保证在任何机器上都能跑
-        ckpt = torch.load(file_path, map_location='cpu')
+        ckpt = torch.load(file_path, map_location='cpu', weights_only=False)
     except Exception as e:
         print(f"无法加载文件: {e}")
         return None
